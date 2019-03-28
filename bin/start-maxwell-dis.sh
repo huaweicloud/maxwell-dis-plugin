@@ -1,0 +1,60 @@
+#!/bin/bash -l
+
+pdir=$(cd "`dirname $0`";cd ../;pwd)
+cd "${pdir}"
+
+MAIN_CLASS="com.zendesk.maxwell.Maxwell"
+
+process=`ps -ef | grep "${MAIN_CLASS}" | grep -v grep`
+if [ $? -eq 0 ]; then
+    pid=`echo ${process} | awk -F" " '{print $2}'`
+    echo "Maxwell [${pid}] is running, please stop it first."
+    exit 1
+fi
+    
+JAVACMD="java"
+JAVA_START_HEAP="256m"
+JAVA_MAX_HEAP="512m"
+
+JAVA_PATH=`which ${JAVACMD}`
+if [ "${JAVA_PATH}" == "" ]; then
+    echo "No java found, please install JRE1.8+"
+    exit 1
+fi
+
+JAVA_VERSION=`java -version 2>&1 |awk 'NR==1{ gsub(/"/,""); print $3 }'`
+if [[ "${JAVA_VERSION}" =~ "1.7" || "${JAVA_VERSION}" =~ "1.6" || "${JAVA_VERSION}" =~ "1.5" ]]; then
+    echo "Java version ${JAVA_VERSION} is too low, please upgrade to 1.8+"
+    exit 1
+fi
+
+LIB_DIR="${pdir}/lib/*"
+CONFIG_DIR="."
+#CLASSPATH="$LIB_DIR":$(find "$LIB_DIR" -type f -name \*.jar | paste -s -d : -):"$CLASSPATH":"$CONFIG_DIR"
+OOME_ARGS="-XX:OnOutOfMemoryError=\"/bin/kill -9 %p\""
+JVM_ARGS="-Xms${JAVA_START_HEAP} -Xmx${JAVA_MAX_HEAP} -Dfile.encoding=UTF-8 -Dlog4j.shutdownCallbackRegistry=com.djdch.log4j.StaticShutdownCallbackRegistry -Djava.io.tmpdir=${CONFIG_DIR} -Dlog4j.configurationFile=log4j2.xml $JVM_ARGS"
+
+MAIN_CLASS_ARGS=$@
+if [ "${MAIN_CLASS_ARGS}" == "" ]; then
+    MAIN_CLASS_ARGS="--config ${pdir}/conf/config.properties"
+fi
+exec $JAVACMD $JVM_ARGS $JVM_DBG_OPTS "$OOME_ARGS" \
+  -cp "${LIB_DIR}" \
+  $MAIN_CLASS ${MAIN_CLASS_ARGS} > /dev/null 2>&1 &
+  
+sleep 1
+if [ $? -eq 0 ]; then
+    process=`ps -ef | grep "${MAIN_CLASS}" | grep -v grep`
+    if [ $? -ne 0 ]; then
+        echo -e "Failed to start maxwell, cloud not find Maxwell process id, please check logs/maxwell-dis.log for detail information.\n"
+        if [ -e "${pdir}/logs/maxwell-dis.log" ]; then
+            tail -n +`grep -n "ERROR" "${pdir}/logs/maxwell-dis.log" | tail -1 | awk -F":" '{print $1}'` "${pdir}/logs/maxwell-dis.log" | tail - 100
+        fi
+        exit 1
+    fi
+    pid=`echo ${process} | awk -F" " '{print $2}'`
+    echo "${pid}" > "${pdir}/maxwell.pid"
+    echo "Success to start Maxwell [${pid}]."
+else
+    echo "Failed to start Maxwell."
+fi
