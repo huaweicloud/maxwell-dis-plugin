@@ -5,10 +5,9 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-import org.apache.kafka.clients.producer.Callback;
-import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.clients.producer.RecordMetadata;
-
+import com.huaweicloud.dis.adapter.kafka.clients.producer.Callback;
+import com.huaweicloud.dis.adapter.kafka.clients.producer.ProducerRecord;
+import com.huaweicloud.dis.adapter.kafka.clients.producer.RecordMetadata;
 import com.zendesk.maxwell.MaxwellConfig;
 import com.zendesk.maxwell.monitoring.MaxwellDiagnostic;
 import com.zendesk.maxwell.monitoring.MaxwellDiagnosticResult;

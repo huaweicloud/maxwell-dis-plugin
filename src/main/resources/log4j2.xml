@@ -5,8 +5,8 @@
             <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} [%-5p] (%t) %logger{1} - %msg%n"/>
         </Console>
 
-        <RollingFile name="RollingFile" fileName="logs/maxwell-dis.log"
-                     filePattern="logs/maxwell-dis-%d{yyyy-MM-dd}-%i.log">
+        <RollingFile name="RollingFile" fileName="logs/${env:MAXWELL_LOGGER_NAME:-maxwell-dis}.log"
+                     filePattern="logs/${env:MAXWELL_LOGGER_NAME:-maxwell-dis}-%d{yyyy-MM-dd}-%i.log">
             <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} [%-5p] (%t) %logger{1} - %msg%n"/>
             <Policies>
                 <TimeBasedTriggeringPolicy/>
@@ -15,14 +15,14 @@
             <DefaultRolloverStrategy fileIndex="max" max="10">
                 <Delete basePath="logs/" maxDepth="1">
                     <IfFileName glob="*.log"/>
-                    <IfLastModified age="10d"/>
+                    <IfLastModified age="15d"/>
                 </Delete>
             </DefaultRolloverStrategy>
         </RollingFile>
     </Appenders>
     <Loggers>
         <Root level="info">
-            <!--<AppenderRef ref="Console"/>-->
+            <AppenderRef ref="Console"/>
             <AppenderRef ref="RollingFile"/>
         </Root>
         <Logger name="snaq.db.ConnectionPool.RawMaxwellConnectionPool" level="off" additivity="false"/>

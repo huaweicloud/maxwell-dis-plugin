@@ -1,37 +1,37 @@
 package com.zendesk.maxwell.producer;
 
-import java.util.Map;
-import java.util.Properties;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeoutException;
-
-import org.apache.commons.lang3.StringUtils;
-import org.apache.kafka.clients.producer.Callback;
-import org.apache.kafka.clients.producer.Producer;
-import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.clients.producer.RecordMetadata;
-import org.apache.kafka.common.errors.RecordTooLargeException;
-import org.apache.kafka.common.serialization.StringSerializer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Meter;
 import com.google.common.base.Preconditions;
+import com.huaweicloud.dis.adapter.kafka.clients.producer.*;
+import com.huaweicloud.dis.adapter.kafka.common.serialization.StringSerializer;
 import com.huaweicloud.dis.exception.DISClientException;
-import com.huaweicloud.dis.sdk.adapter.kafka.producer.DISKafkaProducer;
 import com.zendesk.maxwell.MaxwellContext;
-import com.zendesk.maxwell.producer.partitioners.MaxwellKafkaPartitioner;
+import com.zendesk.maxwell.producer.partitioners.MaxwellDISPartitioner;
 import com.zendesk.maxwell.replication.Position;
 import com.zendesk.maxwell.row.RowMap;
 import com.zendesk.maxwell.row.RowMap.KeyFormat;
 import com.zendesk.maxwell.schema.ddl.DDLMap;
 import com.zendesk.maxwell.util.StoppableTask;
 import com.zendesk.maxwell.util.StoppableTaskState;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.kafka.common.errors.RecordTooLargeException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Map;
+import java.util.Properties;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeoutException;
 
 class DisCallback implements Callback {
 	public static final Logger LOGGER = LoggerFactory.getLogger(MaxwellDisProducer.class);
+
+	public static final String ERROR_CODE_INVALID_RECORD_SIZE = "DIS.4213";
+
+	public static final String ERROR_CODE_PARTITION_IS_READONLY = "DIS.4318";
+
 	private final AbstractAsyncProducer.CallbackCompleter cc;
 	private final Position position;
 	private final String json;
@@ -59,36 +59,37 @@ class DisCallback implements Callback {
 
 	@Override
 	public void onCompletion(RecordMetadata md, Exception e) {
-		if ( e != null ) {
-			this.failedMessageCount.inc();
-			this.failedMessageMeter.mark();
+        if (e != null) {
+            this.failedMessageCount.inc();
+            this.failedMessageMeter.mark();
 
-			LOGGER.error(e.getClass().getSimpleName() + " @ " + position + " -- " + key);
-			LOGGER.error(e.getLocalizedMessage());
-			if ( e instanceof RecordTooLargeException ) {
-				LOGGER.error("Considering raising max.request.size broker-side.");
-			}
-			else if (e instanceof DISClientException && e.getMessage().contains("DIS.4213")) {
-				LOGGER.error(e.getMessage(), e);
-			}
-			else if (!this.context.getConfig().ignoreProducerError) {
-				this.context.terminate(e);
-				return;
-			}
-		} else {
-			this.succeededMessageCount.inc();
-			this.succeededMessageMeter.mark();
+            LOGGER.error(e.getClass().getSimpleName() + " @ " + position + " -- " + key);
+            LOGGER.error(e.getLocalizedMessage());
+            if (e instanceof RecordTooLargeException) {
+                LOGGER.error("Considering raising max.request.size broker-side.");
+            }
+            // DIS.4213 Invalid record size
+            // DIS.4318 Partition is readonly
+            else if (e instanceof DISClientException && e.getMessage().contains(ERROR_CODE_INVALID_RECORD_SIZE)) {
+                LOGGER.error("record size is too big, {}", e.getMessage());
+            } else if (!this.context.getConfig().ignoreProducerError) {
+                this.context.terminate(e);
+                return;
+            }
+        } else {
+            this.succeededMessageCount.inc();
+            this.succeededMessageMeter.mark();
 
-			if (LOGGER.isDebugEnabled()) {
-				LOGGER.debug("->  partitionKey:" + key + ", partitionId:" + md.partition() + ", sequenceNumber:" + md.offset());
-				LOGGER.debug("   " + this.json);
-				LOGGER.debug("   " + position);
-				LOGGER.debug("");
-			}
-		}
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("->  partitionKey:" + key + ", partitionId:" + md.partition() + ", sequenceNumber:" + md.offset());
+                LOGGER.debug("   " + this.json);
+                LOGGER.debug("   " + position);
+                LOGGER.debug("");
+            }
+        }
 
-		cc.markCompleted();
-	}
+        cc.markCompleted();
+    }
 }
 
 public class MaxwellDisProducer extends AbstractProducer {
@@ -126,20 +127,21 @@ class MaxwellDisProducerWorker extends AbstractAsyncProducer implements Runnable
 	private final Producer<String, String> kafka;
 	private String topic;
 	private final String ddlTopic;
-	private final MaxwellKafkaPartitioner partitioner;
-	private final MaxwellKafkaPartitioner ddlPartitioner;
+	private final MaxwellDISPartitioner partitioner;
+	private final MaxwellDISPartitioner ddlPartitioner;
 	private final KeyFormat keyFormat;
 	private final boolean interpolateTopic;
 	private final ArrayBlockingQueue<RowMap> queue;
 	private Thread thread;
 	private StoppableTaskState taskState;
 	private final Map<String, PartitionNum> partitionNumMap = new ConcurrentHashMap<>();
-	
-	public static MaxwellKafkaPartitioner makeDDLPartitioner(String partitionHashFunc, String partitionKey) {
+    private final TableMapping tableMapping;
+
+    public static MaxwellDISPartitioner makeDDLPartitioner(String partitionHashFunc, String partitionKey) {
 		if ( partitionKey.equals("table") ) {
-			return new MaxwellKafkaPartitioner(partitionHashFunc, "table", null, "database");
+			return new MaxwellDISPartitioner(partitionHashFunc, "table", null, "database");
 		} else {
-			return new MaxwellKafkaPartitioner(partitionHashFunc, "database", null, null);
+			return new MaxwellDISPartitioner(partitionHashFunc, "database", null, null);
 		}
 	}
 	
@@ -156,11 +158,11 @@ class MaxwellDisProducerWorker extends AbstractAsyncProducer implements Runnable
 		String partitionKey = context.getConfig().producerPartitionKey;
 		String partitionColumns = context.getConfig().producerPartitionColumns;
 		String partitionFallback = context.getConfig().producerPartitionFallback;
-		this.partitioner = new MaxwellKafkaPartitioner(hash, partitionKey, partitionColumns, partitionFallback);
+		this.partitioner = new MaxwellDISPartitioner(hash, partitionKey, partitionColumns, partitionFallback);
 
 		this.ddlPartitioner = makeDDLPartitioner(hash, partitionKey);
 		this.ddlTopic =  context.getConfig().disDdlStream;
-
+        this.tableMapping = context.getConfig().disTableMapping;
 		if ( context.getConfig().disKeyFormat.equals("hash") )
 			keyFormat = KeyFormat.HASH;
 		else
@@ -168,10 +170,10 @@ class MaxwellDisProducerWorker extends AbstractAsyncProducer implements Runnable
 
 		this.queue = queue;
 		this.taskState = new StoppableTaskState("MaxwellDisProducerWorker");
-		this.partitionNumMap.put(kafkaTopic, new PartitionNum(kafka.partitionsFor(kafkaTopic).size()));
-		if (StringUtils.isNotBlank(ddlTopic) && !ddlTopic.equals(kafkaTopic))
-		{
-			this.partitionNumMap.put(ddlTopic, new PartitionNum(kafka.partitionsFor(ddlTopic).size()));
+		// init partition metadata
+		getNumPartitions(kafkaTopic);
+		if (StringUtils.isNotBlank(ddlTopic) && !ddlTopic.equals(kafkaTopic)) {
+			getNumPartitions(ddlTopic);
 		}
 	}
 
@@ -197,12 +199,12 @@ class MaxwellDisProducerWorker extends AbstractAsyncProducer implements Runnable
 	private Integer getNumPartitions(String topic)
 	{
 		PartitionNum partitionNum = this.partitionNumMap.get(topic);
-		if (partitionNum == null || partitionNum.expire(context.getConfig().disStreamCacheSecond))
-		{
-			partitionNum = new PartitionNum(kafka.partitionsFor(topic).size());
-			LOGGER.info("Refresh stream {}, partitionNum is {}", topic, partitionNum.partitionNum);
-			this.partitionNumMap.put(topic, partitionNum);
-		}
+        if (partitionNum == null || partitionNum.expire(context.getConfig().disStreamCacheSecond)) {
+            partitionNum = new PartitionNum(kafka.partitionsFor(topic).size());
+            LOGGER.info("Refresh stream {}, partitionNum is {}", topic, partitionNum.partitionNum);
+            this.partitionNumMap.put(topic, partitionNum);
+
+        }
 		return partitionNum.partitionNum;
 	}
 
@@ -231,23 +233,46 @@ class MaxwellDisProducerWorker extends AbstractAsyncProducer implements Runnable
 	}
 
 	ProducerRecord<String, String> makeProducerRecord(final RowMap r) throws Exception {
-		String key = r.pkToJson(keyFormat);
-		String value = r.toJSON(outputConfig);
-		ProducerRecord<String, String> record;
-		if (r instanceof DDLMap) {
-			record = new ProducerRecord<>(this.ddlTopic, this.ddlPartitioner.kafkaPartition(r, getNumPartitions(this.ddlTopic)), key, value);
-		} else {
-			String topic;
+        String key = r.pkToJson(keyFormat);
+        String value = r.toJSON(outputConfig);
+        ProducerRecord<String, String> record;
 
-			// javascript topic override
-			topic = r.getKafkaTopic();
-			if ( topic == null )
-				topic = generateTopic(this.topic, r);
+        String topic = null;
+        Integer partitionId = null;
 
-			record = new ProducerRecord<>(topic, this.partitioner.kafkaPartition(r, getNumPartitions(topic)), key, value);
-		}
-		return record;
-	}
+        TableMapping.TableMappingRule rule = this.tableMapping.matches(r.getDatabase(), r.getTable());
+        if (rule != null) {
+            topic = rule.getStreamName();
+            partitionId = rule.getPartitionId();
+        }
+
+        if (r instanceof DDLMap) {
+            if (!this.topic.equals(this.ddlTopic)) {
+                // ddl use fixed topic
+                topic = this.ddlTopic;
+                partitionId = null;
+            } else if (topic == null) {
+                // use
+                topic = this.ddlTopic;
+            }
+
+            if (partitionId == null) {
+                partitionId = this.ddlPartitioner.disPartition(r, key, getNumPartitions(topic));
+            }
+        } else {
+            if (topic == null) {
+                // javascript topic override
+                topic = r.getKafkaTopic();
+                if (topic == null) {
+                    topic = generateTopic(this.topic, r);
+                }
+            }
+            if (partitionId == null) {
+                partitionId = this.partitioner.disPartition(r, key, getNumPartitions(topic));
+            }
+        }
+        return new ProducerRecord<>(topic, partitionId, key, value);
+    }
 
 	@Override
 	public void requestStop() {

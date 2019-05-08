@@ -1,13 +1,38 @@
 #!/bin/bash -l
 
+while getopts 'f:l:' opt; do
+    case $opt in
+        f)
+            config_value="$OPTARG";;
+        l)
+            logger_value="$OPTARG";;
+        ?)
+            echo "Usage: `basename $0` -f config_file -l logger_name"
+            exit
+    esac
+done
+
 pdir=$(cd "`dirname $0`";cd ../;pwd)
+
+CONFIG_PATH=${pdir}/conf/config.properties
+if [ -n "${config_value}" ]; then
+    CONFIG_PATH=`echo ${config_value} |  cut -d" " -f1 | xargs -n1 realpath`
+fi
+
+export MAXWELL_LOGGER_NAME="maxwell-dis"
+if [ -n "${logger_value}" ]; then
+    export MAXWELL_LOGGER_NAME=${logger_value}
+fi
+
+MAIN_CLASS_ARGS="--config ${CONFIG_PATH} --logger ${MAXWELL_LOGGER_NAME}"
+
 cd "${pdir}"
 
 MAIN_CLASS="com.zendesk.maxwell.Maxwell"
 
-process=`ps -ef | grep "${MAIN_CLASS}" | grep -v grep`
+process=`ps -ef | grep "${MAIN_CLASS}" | grep "${CONFIG_PATH}" | grep -v grep`
 if [ $? -eq 0 ]; then
-    pid=`echo ${process} | awk -F" " '{print $2}'`
+    pid=`echo ${process} | awk '{print $2}'`
     echo "Maxwell [${pid}] is running, please stop it first."
     exit 1
 fi
@@ -34,10 +59,6 @@ CONFIG_DIR="."
 OOME_ARGS="-XX:OnOutOfMemoryError=\"/bin/kill -9 %p\""
 JVM_ARGS="-Xms${JAVA_START_HEAP} -Xmx${JAVA_MAX_HEAP} -Dfile.encoding=UTF-8 -Dlog4j.shutdownCallbackRegistry=com.djdch.log4j.StaticShutdownCallbackRegistry -Djava.io.tmpdir=${CONFIG_DIR} -Dlog4j.configurationFile=log4j2.xml $JVM_ARGS"
 
-MAIN_CLASS_ARGS=$@
-if [ "${MAIN_CLASS_ARGS}" == "" ]; then
-    MAIN_CLASS_ARGS="--config ${pdir}/conf/config.properties"
-fi
 exec $JAVACMD $JVM_ARGS $JVM_DBG_OPTS "$OOME_ARGS" \
   -cp "${LIB_DIR}" \
   $MAIN_CLASS ${MAIN_CLASS_ARGS} > /dev/null 2>&1 &
@@ -53,7 +74,7 @@ if [ $? -eq 0 ]; then
         exit 1
     fi
     pid=`echo ${process} | awk -F" " '{print $2}'`
-    echo "${pid}" > "${pdir}/maxwell.pid"
+    echo "${pid}" >> "${pdir}/maxwell.pid"
     echo "Success to start Maxwell [${pid}]."
 else
     echo "Failed to start Maxwell."
