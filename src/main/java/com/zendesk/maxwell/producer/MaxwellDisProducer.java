@@ -5,22 +5,27 @@ import com.codahale.metrics.Meter;
 import com.google.common.base.Preconditions;
 import com.huaweicloud.dis.adapter.kafka.clients.producer.*;
 import com.huaweicloud.dis.adapter.kafka.common.serialization.StringSerializer;
+import com.huaweicloud.dis.exception.DISAuthenticationException;
 import com.huaweicloud.dis.exception.DISClientException;
+import com.huaweicloud.dis.exception.DISStreamNotExistsException;
 import com.zendesk.maxwell.MaxwellContext;
 import com.zendesk.maxwell.producer.partitioners.MaxwellDISPartitioner;
 import com.zendesk.maxwell.replication.Position;
 import com.zendesk.maxwell.row.RowMap;
 import com.zendesk.maxwell.row.RowMap.KeyFormat;
 import com.zendesk.maxwell.schema.ddl.DDLMap;
+import com.zendesk.maxwell.sqlite.FailedRecord;
+import com.zendesk.maxwell.sqlite.FailedRecordMgt;
+import com.zendesk.maxwell.util.AESUtil;
 import com.zendesk.maxwell.util.StoppableTask;
 import com.zendesk.maxwell.util.StoppableTaskState;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.kafka.common.errors.RecordTooLargeException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.Properties;
+import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeoutException;
@@ -33,6 +38,7 @@ class DisCallback implements Callback {
 	public static final String ERROR_CODE_PARTITION_IS_READONLY = "DIS.4318";
 
 	private final AbstractAsyncProducer.CallbackCompleter cc;
+	private final RowMap rowMap;
 	private final Position position;
 	private final String json;
 	private final String key;
@@ -42,12 +48,14 @@ class DisCallback implements Callback {
 	private Counter failedMessageCount;
 	private Meter succeededMessageMeter;
 	private Meter failedMessageMeter;
+    private boolean needEncryptData;
 
-	public DisCallback(AbstractAsyncProducer.CallbackCompleter cc, Position position, String key, String json,
+	public DisCallback(AbstractAsyncProducer.CallbackCompleter cc, RowMap r, String key, String json,
 	                     Counter producedMessageCount, Counter failedMessageCount, Meter producedMessageMeter,
 	                     Meter failedMessageMeter, MaxwellContext context) {
 		this.cc = cc;
-		this.position = position;
+		this.rowMap = r;
+		this.position = r.getNextPosition();
 		this.key = key;
 		this.json = json;
 		this.succeededMessageCount = producedMessageCount;
@@ -55,6 +63,7 @@ class DisCallback implements Callback {
 		this.succeededMessageMeter = producedMessageMeter;
 		this.failedMessageMeter = failedMessageMeter;
 		this.context = context;
+		this.needEncryptData = StringUtils.isNotBlank(context.getConfig().producerErrorDataPassword);
 	}
 
 	@Override
@@ -65,16 +74,33 @@ class DisCallback implements Callback {
 
             LOGGER.error(e.getClass().getSimpleName() + " @ " + position + " -- " + key);
             LOGGER.error(e.getLocalizedMessage());
-            if (e instanceof RecordTooLargeException) {
-                LOGGER.error("Considering raising max.request.size broker-side.");
+
+            boolean ignoreProducerError = this.context.getConfig().ignoreProducerError;
+
+            if (e instanceof DISAuthenticationException || e instanceof DISStreamNotExistsException) {
+                LOGGER.error("Could not retriable exception {}", e.getMessage(), e);
             }
             // DIS.4213 Invalid record size
             // DIS.4318 Partition is readonly
-            else if (e instanceof DISClientException && e.getMessage().contains(ERROR_CODE_INVALID_RECORD_SIZE)) {
-                LOGGER.error("record size is too big, {}", e.getMessage());
-            } else if (!this.context.getConfig().ignoreProducerError) {
+            else if (e instanceof DISClientException) {
+                if (e.getMessage().contains(ERROR_CODE_INVALID_RECORD_SIZE)) {
+                    LOGGER.error("record size is too big, {}", e.getMessage());
+                    ignoreProducerError = true;
+                }
+            }
+
+            if (!ignoreProducerError) {
                 this.context.terminate(e);
                 return;
+            } else {
+                try {
+                    recordErrorData();
+                    LOGGER.info("Success to record {}@{} to local db.", position, key);
+                } catch (Exception error) {
+                    LOGGER.error("Failed to record error data : {}", e.getMessage(), e);
+                    this.context.terminate(error);
+                    return;
+                }
             }
         } else {
             this.succeededMessageCount.inc();
@@ -89,6 +115,21 @@ class DisCallback implements Callback {
         }
 
         cc.markCompleted();
+    }
+
+    public void recordErrorData() {
+        FailedRecord failedRecord = new FailedRecord();
+        failedRecord.setId(UUID.randomUUID().toString());
+        failedRecord.setDatabase(rowMap.getDatabase());
+        failedRecord.setTable(rowMap.getTable());
+        failedRecord.setType(rowMap.getRowType());
+        failedRecord.setData(needEncryptData ? AESUtil.encrypt(json, context.getConfig().producerErrorDataPassword) : json);
+        failedRecord.setKey(key);
+        failedRecord.setTs(rowMap.getTimestampMillis());
+        failedRecord.setPosition(rowMap.getPosition().getBinlogPosition().toString());
+        failedRecord.setNextPosition(rowMap.getNextPosition().getBinlogPosition().toString());
+        failedRecord.setStatus(0);
+        FailedRecordMgt.getInstance().insertFailedRecord(failedRecord);
     }
 }
 
@@ -163,11 +204,13 @@ class MaxwellDisProducerWorker extends AbstractAsyncProducer implements Runnable
 		this.ddlPartitioner = makeDDLPartitioner(hash, partitionKey);
 		this.ddlTopic =  context.getConfig().disDdlStream;
         this.tableMapping = context.getConfig().disTableMapping;
-		if ( context.getConfig().disKeyFormat.equals("hash") )
-			keyFormat = KeyFormat.HASH;
-		else
-			keyFormat = KeyFormat.ARRAY;
-
+        if (context.getConfig().disKeyFormat.equals(KeyFormat.HASH.name().toLowerCase())) {
+            keyFormat = KeyFormat.HASH;
+        } else if (context.getConfig().disKeyFormat.equals(KeyFormat.ARRAY.name().toLowerCase())) {
+            keyFormat = KeyFormat.ARRAY;
+        } else {
+            keyFormat = KeyFormat.HASH_TABLE_ONLY;
+        }
 		this.queue = queue;
 		this.taskState = new StoppableTaskState("MaxwellDisProducerWorker");
 		// init partition metadata
@@ -222,7 +265,7 @@ class MaxwellDisProducerWorker extends AbstractAsyncProducer implements Runnable
 		/* if debug logging isn't enabled, release the reference to `value`, which can ease memory pressure somewhat */
 		String value = DisCallback.LOGGER.isDebugEnabled() ? record.value() : null;
 
-		DisCallback callback = new DisCallback(cc, r.getNextPosition(), record.key(), value,
+		DisCallback callback = new DisCallback(cc, r, record.key(), value,
 				this.succeededMessageCount, this.failedMessageCount, this.succeededMessageMeter, this.failedMessageMeter, this.context);
 
 		sendAsync(record, callback);

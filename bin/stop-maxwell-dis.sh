@@ -54,8 +54,14 @@ do
             /bin/echo -n "."
         fi
     else
-        sed -i "/${pid}/d" maxwell.pid
-        echo " Successfully."
+        if [ -e "${pdir}/maxwell.pid" ]; then
+            sed -i "/${pid}/d" "${pdir}/maxwell.pid"
+        fi
+
+        if [ ${process_num} -eq 1 ]; then
+            find "${pdir}/lib/" -name "sqlite-*sqlitejdbc*" | xargs -n1 rm -f
+        fi
+        /bin/echo " Successfully."
         exit 0
     fi
 done

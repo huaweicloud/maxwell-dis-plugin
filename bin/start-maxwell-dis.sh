@@ -57,7 +57,7 @@ LIB_DIR="${pdir}/lib/*"
 CONFIG_DIR="."
 #CLASSPATH="$LIB_DIR":$(find "$LIB_DIR" -type f -name \*.jar | paste -s -d : -):"$CLASSPATH":"$CONFIG_DIR"
 OOME_ARGS="-XX:OnOutOfMemoryError=\"/bin/kill -9 %p\""
-JVM_ARGS="-Xms${JAVA_START_HEAP} -Xmx${JAVA_MAX_HEAP} -Dfile.encoding=UTF-8 -Dlog4j.shutdownCallbackRegistry=com.djdch.log4j.StaticShutdownCallbackRegistry -Djava.io.tmpdir=${CONFIG_DIR} -Dlog4j.configurationFile=log4j2.xml $JVM_ARGS"
+JVM_ARGS="-Xms${JAVA_START_HEAP} -Xmx${JAVA_MAX_HEAP} -Djava.io.tmpdir=${pdir}/lib -Dfile.encoding=UTF-8 -Dlog4j.shutdownCallbackRegistry=com.djdch.log4j.StaticShutdownCallbackRegistry -Dlog4j.configurationFile=log4j2.xml $JVM_ARGS"
 
 exec $JAVACMD $JVM_ARGS $JVM_DBG_OPTS "$OOME_ARGS" \
   -cp "${LIB_DIR}" \

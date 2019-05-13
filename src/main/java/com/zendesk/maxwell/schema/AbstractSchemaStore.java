@@ -1,20 +1,17 @@
 package com.zendesk.maxwell.schema;
 
-import java.sql.SQLException;
-import java.sql.Connection;
-import java.util.List;
-import java.util.ArrayList;
-
 import com.zendesk.maxwell.CaseSensitivity;
+import com.zendesk.maxwell.MaxwellContext;
 import com.zendesk.maxwell.filtering.Filter;
+import com.zendesk.maxwell.schema.ddl.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import com.zendesk.maxwell.MaxwellContext;
-import com.zendesk.maxwell.schema.ddl.SchemaChange;
-import com.zendesk.maxwell.schema.ddl.ResolvedSchemaChange;
-import com.zendesk.maxwell.schema.ddl.InvalidSchemaError;
 import snaq.db.ConnectionPool;
+
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 
 public abstract class AbstractSchemaStore {
 	static final Logger LOGGER = LoggerFactory.getLogger(AbstractSchemaStore.class);
@@ -54,17 +51,23 @@ public abstract class AbstractSchemaStore {
 		ArrayList<ResolvedSchemaChange> resolvedSchemaChanges = new ArrayList<>();
 
 		for ( SchemaChange change : changes ) {
-			if ( !change.isBlacklisted(this.filter) ) {
-				ResolvedSchemaChange resolved = change.resolve(schema);
-				if ( resolved != null ) {
-					resolved.apply(schema);
-
-					resolvedSchemaChanges.add(resolved);
-				}
-			} else {
-				LOGGER.debug("ignoring blacklisted schema change");
-			}
-		}
+            if (!change.isBlacklisted(this.filter)) {
+                ResolvedSchemaChange resolved = change.resolve(schema);
+                if (resolved != null) {
+                    try {
+                        resolved.apply(schema);
+                    } catch (InvalidSchemaError e) {
+                        if (resolved instanceof ResolvedTableCreate || resolved instanceof ResolvedTableDrop || resolved instanceof ResolvedTableAlter
+                                || resolved instanceof ResolvedDatabaseCreate || resolved instanceof ResolvedDatabaseDrop || resolved instanceof ResolvedDatabaseAlter) {
+                            continue;
+                        }
+                    }
+                    resolvedSchemaChanges.add(resolved);
+                }
+            } else {
+                LOGGER.debug("ignoring blacklisted schema change");
+            }
+        }
 		return resolvedSchemaChanges;
 	}
 }

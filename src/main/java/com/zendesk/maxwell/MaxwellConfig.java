@@ -122,6 +122,7 @@ public class MaxwellConfig extends AbstractConfig {
     public boolean replayMode;
     public boolean masterRecovery;
     public boolean ignoreProducerError;
+    public String producerErrorDataPassword;
     public boolean recaptureSchema;
 
     public String rabbitmqUser;
@@ -419,7 +420,7 @@ public class MaxwellConfig extends AbstractConfig {
 
         this.disStream = fetchOption("dis.stream", options, properties, null);
         this.disDdlStream = fetchOption("dis.ddl.stream", options, properties, this.disStream);
-        this.disKeyFormat = fetchOption("dis.key.format", options, properties, "hash");
+        this.disKeyFormat = fetchOption("dis.key.format", options, properties, "hash_table_only");
         this.disPartitionHash = fetchOption("dis.partition.hash", options, properties, "default");
         this.disStreamCacheSecond = fetchLongOption("dis.stream.cache.second", options, properties, 3600L);
         this.heartbeatInterval = fetchLongOption("heartbeat.interval", options, properties, 30L);
@@ -583,6 +584,10 @@ public class MaxwellConfig extends AbstractConfig {
         this.replayMode = fetchBooleanOption("replay", options, null, false);
         this.masterRecovery = fetchBooleanOption("master_recovery", options, properties, false);
         this.ignoreProducerError = fetchBooleanOption("ignore_producer_error", options, properties, true);
+        this.producerErrorDataPassword = fetchOption("producer_error_data_password", options, properties, null);
+        if (StringUtils.isNotBlank(this.producerErrorDataPassword)) {
+            tryGetDecryptValue(producerErrorDataPassword, passwordEncryptKey);
+        }
         this.recaptureSchema = fetchBooleanOption("recapture_schema", options, null, false);
 
         outputConfig.includesBinlogPosition = fetchBooleanOption("output_binlog_position", options, properties, false);
