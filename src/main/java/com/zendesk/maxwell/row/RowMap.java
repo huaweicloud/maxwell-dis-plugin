@@ -1,9 +1,11 @@
 package com.zendesk.maxwell.row;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonGenerator;
 import com.zendesk.maxwell.errors.ProtectedAttributeNameException;
 import com.zendesk.maxwell.producer.EncryptionMode;
-import com.zendesk.maxwell.replication.BinlogPosition;
 import com.zendesk.maxwell.producer.MaxwellOutputConfig;
+import com.zendesk.maxwell.replication.BinlogPosition;
 import com.zendesk.maxwell.replication.Position;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,21 +14,13 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.Serializable;
 import java.security.NoSuchAlgorithmException;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.regex.Pattern;
-
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonGenerator;
 
 
 public class RowMap implements Serializable {
 
-	public enum KeyFormat { HASH, ARRAY }
+	public enum KeyFormat { HASH, ARRAY, HASH_TABLE_ONLY }
 
 	static final Logger LOGGER = LoggerFactory.getLogger(RowMap.class);
 
@@ -139,10 +133,25 @@ public class RowMap implements Serializable {
 
 	//Do we want to encrypt this part?
 	public String pkToJson(KeyFormat keyFormat) throws IOException {
-		if ( keyFormat == KeyFormat.HASH )
+		if (keyFormat == KeyFormat.HASH) {
 			return pkToJsonHash();
-		else
+		} else if (keyFormat == KeyFormat.ARRAY) {
 			return pkToJsonArray();
+		} else {
+			return pkToJsonHashTableOnly();
+		}
+	}
+
+	private String pkToJsonHashTableOnly() throws IOException {
+		JsonGenerator g = resetJsonGenerator();
+
+		g.writeStartObject(); // start of row {
+
+		g.writeStringField(FieldNames.DATABASE, database);
+		g.writeStringField(FieldNames.TABLE, table);
+		g.writeEndObject(); // end of 'data: { }'
+		g.flush();
+		return jsonFromStream();
 	}
 
 	private String pkToJsonHash() throws IOException {

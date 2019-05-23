@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory;
 import java.net.URISyntaxException;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.Arrays;
 
 public class Maxwell implements Runnable {
 	protected MaxwellConfig config;
@@ -225,6 +226,7 @@ public class Maxwell implements Runnable {
 	}
 
 	public static void main(String[] args) {
+		LOGGER.info("Starting Maxwell with args {}", Arrays.toString(args));
 		try {
 			Logging.setupLogBridging();
 			MaxwellConfig config = new MaxwellConfig(args);

@@ -5,11 +5,10 @@ import com.zendesk.maxwell.row.RowMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.UUID;
 
 public abstract class AbstractMaxwellPartitioner {
 	List<String> partitionColumns = new ArrayList<String>();
-	private final PartitionBy partitionBy, partitionByFallback;
+	protected final PartitionBy partitionBy, partitionByFallback;
 
 	private PartitionBy partitionByForString(String key) {
 		if ( key == null )
@@ -24,6 +23,8 @@ public abstract class AbstractMaxwellPartitioner {
 				return PartitionBy.PRIMARY_KEY;
 			case "column":
 				return PartitionBy.COLUMN;
+			case "partition_key":
+				return PartitionBy.PARTITION_KEY;
 			default:
 				throw new RuntimeException("Unknown partitionBy string: " + key);
 		}
