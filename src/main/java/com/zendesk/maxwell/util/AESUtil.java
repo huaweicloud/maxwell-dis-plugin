@@ -14,7 +14,6 @@ import java.util.logging.Logger;
 public class AESUtil {
     private static final String KEY_ALGORITHM = "AES";
     private static final String DEFAULT_CIPHER_ALGORITHM = "AES/ECB/PKCS5Padding";
-    private static final String KEY_PASSWORD = "91f23a01-ca72-46c1-b1bf-037cbc88f326";
 
     /**
      * AES 加密操作
@@ -24,8 +23,8 @@ public class AESUtil {
      * @return 返回Base64转码后的加密数据
      */
     public static String encrypt(String content, String password) {
-        if (password == null) {
-            password = KEY_PASSWORD;
+        if (password == null || password.isEmpty()) {
+            throw new RuntimeException("Password is empty.");
         }
         try {
             Cipher cipher = Cipher.getInstance(DEFAULT_CIPHER_ALGORITHM);// 创建密码器
@@ -44,10 +43,6 @@ public class AESUtil {
         return null;
     }
 
-    public static String encrypt(String content) {
-        return encrypt(content, KEY_PASSWORD);
-    }
-
     /**
      * AES 解密操作
      *
@@ -56,8 +51,8 @@ public class AESUtil {
      * @return
      */
     public static String decrypt(String content, String password) {
-        if (password == null) {
-            password = KEY_PASSWORD;
+        if (password == null || password.isEmpty()) {
+            throw new RuntimeException("Password is empty.");
         }
         try {
             //实例化
@@ -75,10 +70,6 @@ public class AESUtil {
         }
 
         return null;
-    }
-
-    public static String decrypt(String content) {
-        return decrypt(content, KEY_PASSWORD);
     }
 
     /**
