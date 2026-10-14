@@ -225,7 +225,7 @@
     <dependency>
       <groupId>com.rabbitmq</groupId>
       <artifactId>amqp-client</artifactId>
-      <version>4.0.0</version>
+      <version>5.37.0</version>
     </dependency>
     <dependency>
       <groupId>com.google.cloud</groupId>
